@@ -1,0 +1,10 @@
+# Coverage is a floor, not a target: these thresholds sit just under what the repo
+# actually reaches, so a regression fails `bun test` locally and in CI. Raise them
+# when coverage rises — never lower them to make a build green.
+#
+# Two things bun does not spell out: the keys are PLURAL (`line`/`function` are
+# silently ignored and the gate does nothing), and the threshold is enforced
+# PER FILE, not on the total — so it tracks the weakest file, not the average.
+[test]
+coverage = true
+coverageThreshold = { lines = 0.89, functions = 0.90 }
