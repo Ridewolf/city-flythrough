@@ -10,7 +10,7 @@
 # blocking the commit: CI runs the same check and is the real gate, and a hook that
 # fails for reasons unrelated to the switcher just teaches people to pass --no-verify.
 #
-# Installed by `bun install` — see scripts/install-hooks.sh.
+# Installed by `bun install` — see scripts/install-hooks.ts.
 
 set -e
 

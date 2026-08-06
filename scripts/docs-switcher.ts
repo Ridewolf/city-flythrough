@@ -191,6 +191,17 @@ const applySwitcher = (source: string, locale: string): string => {
  * nobody can navigate to.
  */
 const assertLocalesMatchDisk = (): void => {
+  // Ahead of the readdir, because its own ENOENT names an absolute path — and inside the
+  // pre-commit hook that path is the temp copy of the index, already deleted by the
+  // EXIT trap before anyone reads the message. Reachable: a commit that removes every
+  // translation still trips the hook's README grep, so it must fail actionably.
+  if (!existsSync(I18N_DIR)) {
+    throw new Error(
+      'docs/i18n/ is missing — restore it, or drop every non-`en` entry from LOCALES ' +
+        'in this script.',
+    );
+  }
+
   const known = new Set<string>(LOCALES.map(([code]) => code));
   const onDisk = readdirSync(I18N_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -218,7 +229,11 @@ const main = (): void => {
 
   assertLocalesMatchDisk();
 
-  const drifted: string[] = [];
+  // Every file is validated before any file is written. A malformed locale aborts the
+  // run, and aborting halfway through the writes would leave the tree in a state that
+  // is neither the old one nor the new one — the same partial-application problem the
+  // convergence check below exists to prevent, one level up.
+  const pending: Array<{ path: string; shown: string; updated: string }> = [];
   for (const [locale] of LOCALES) {
     const path = readmeFor(locale);
     const source = readFileSync(path, 'utf8');
@@ -239,6 +254,11 @@ const main = (): void => {
       );
     }
 
+    pending.push({ path, shown, updated });
+  }
+
+  const drifted: string[] = [];
+  for (const { path, shown, updated } of pending) {
     if (check) {
       drifted.push(shown);
     } else {
