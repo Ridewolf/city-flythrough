@@ -37,7 +37,7 @@
     "creative-coding"
   ],
   "scripts": {
-    "prepare": "sh scripts/install-hooks.sh",
+    "prepare": "bun run scripts/install-hooks.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "docs:switcher": "bun run scripts/docs-switcher.ts",
