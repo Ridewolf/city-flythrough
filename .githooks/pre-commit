@@ -1,0 +1,66 @@
+#!/bin/sh
+# Verifies the README language switcher before a commit lands. Markdown links do not
+# render inside the `<p align="center">` block the switcher lives in, and the i18n
+# generator writes them in the markdown form — so the format has to be checked.
+#
+# It verifies and never writes. Regenerating and re-staging looks friendlier but stages
+# whole files, sweeping in hunks deliberately left out of `git add -p`.
+#
+# Every environmental problem below steps aside with a labelled message instead of
+# blocking the commit: CI runs the same check and is the real gate, and a hook that
+# fails for reasons unrelated to the switcher just teaches people to pass --no-verify.
+#
+# Installed by `bun install` — see scripts/install-hooks.sh.
+
+set -e
+
+# The generator decides the contents of all 16 READMEs, so a commit that touches only it
+# — reordering LOCALES, say — can drift every one of them without staging a README.
+# No --diff-filter: deleting or renaming a translation drifts the set just as much as
+# editing one, and both show up here (a rename under its destination path).
+git diff --cached --name-only |
+  grep -qE '(^|/)README\.md$|^scripts/docs-switcher\.ts$' || exit 0
+
+# GUI git clients and IDEs often run hooks with a minimal PATH.
+if ! command -v bun >/dev/null 2>&1; then
+  echo "pre-commit: bun is not on PATH — skipping the README switcher check." >&2
+  echo "  CI still runs it; run \`bun run docs:switcher:check\` yourself before pushing." >&2
+  exit 0
+fi
+
+# Checking the index means running the generator *from* the index, so it has to be part
+# of it — untrue while this change itself is still uncommitted, and untrue for anyone
+# whose staged tree drops or renames the script. Blaming the switcher for that would
+# send them to regenerate files that are already correct.
+if ! git cat-file -e :scripts/docs-switcher.ts 2>/dev/null; then
+  echo "pre-commit: scripts/docs-switcher.ts is not in the index — skipping the check." >&2
+  echo "  Stage it, or run \`bun run docs:switcher:check\` yourself; CI runs it regardless." >&2
+  exit 0
+fi
+
+# Check the index, not the working tree. The two diverge under partial staging, and only
+# the index becomes the commit — a corrected switcher on disk must not vouch for a broken
+# one in the index, or for drift in a README this commit does not touch.
+staged_tree=$(mktemp -d) || {
+  echo "pre-commit: no temp dir available — skipping the README switcher check." >&2
+  echo "  CI runs the same check." >&2
+  exit 0
+}
+trap 'rm -rf "$staged_tree"' EXIT
+
+if ! git checkout-index --all --prefix="$staged_tree/" 2>/dev/null; then
+  echo "pre-commit: could not materialize the index — skipping the README switcher check." >&2
+  echo "  CI runs the same check." >&2
+  exit 0
+fi
+
+# The script alone, not `bun run docs:switcher:check` inside the copy: it resolves its
+# root from its own location, so going through the staged package.json would only add a
+# second file whose absence gets reported as a switcher problem.
+if ! bun "$staged_tree/scripts/docs-switcher.ts" --check; then
+  # No advice of our own: drift wants `bun run docs:switcher`, but a deleted or renamed
+  # locale wants LOCALES edited instead, and the message above already says which.
+  echo "" >&2
+  echo "pre-commit: blocked by the README switcher check above." >&2
+  exit 1
+fi
