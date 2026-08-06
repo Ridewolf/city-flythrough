@@ -21,6 +21,12 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # The switcher sits inside an HTML block, where markdown links render as
+      # literal brackets, and the i18n generator rewrites it in markdown form —
+      # so it has to be verified, not trusted.
+      - name: Check README language switcher
+        run: bun run docs:switcher:check
+
       - name: Typecheck
         run: bun run typecheck
 

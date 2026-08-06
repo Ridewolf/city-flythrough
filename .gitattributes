@@ -1,0 +1,10 @@
+# LF everywhere, in the repo and in every checkout.
+#
+# scripts/docs-switcher.ts decides drift by string equality, so a CRLF working tree
+# (git's default on Windows) would report all 16 READMEs as drifted, block every commit
+# through the pre-commit hook, and stay invisible in CI — which runs on ubuntu.
+# The shell scripts under scripts/ and .githooks/ need LF to be runnable at all.
+* text=auto eol=lf
+
+*.png binary
+*.gif binary
