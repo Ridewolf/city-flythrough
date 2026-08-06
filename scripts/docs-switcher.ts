@@ -44,21 +44,6 @@ const LOCALES = [
 const OPEN_MARKER = '<!-- docs-i18n:switcher -->';
 const CLOSE_MARKER = '<!-- /docs-i18n:switcher -->';
 
-/**
- * The generated region. The markers are the anchor — matching "the first centered
- * `<sub>` line" instead would let this script overwrite any other centered small-text
- * line that happens to come first, which is a silent way to lose content.
- *
- * The body may not contain another open marker. Without that, a stray `${OPEN_MARKER}`
- * above the real block makes the region span from the stray one all the way to the real
- * close marker, and everything in between — prose, the translation notice — is replaced
- * by the switcher and reported as a routine `updated …`. `assertMarkersWellFormed`
- * refuses that file outright; this is the second lock on the same door.
- */
-const MARKED_BLOCK = new RegExp(
-  `${OPEN_MARKER}\\r?\\n(?:(?!${OPEN_MARKER})[\\s\\S])*?\\r?\\n${CLOSE_MARKER}`,
-);
-
 /** Migration fallback for files that predate the markers — see `locateSwitcher`. */
 const CENTERED_SUB_LINE = /^<p align="center"><sub>.*<\/sub><\/p>$/gm;
 
@@ -68,35 +53,51 @@ const TRANSLATION_NOTICE = /^> 🌐 .*$/m;
 /** How many locale names a bare line must carry before it counts as a switcher. */
 const SWITCHER_LABEL_QUORUM = 3;
 
+const countOccurrences = (source: string, marker: string): number =>
+  source.split(marker).length - 1;
+
 /**
  * Windows checkouts have CRLF READMEs (`core.autocrlf=true`, git's default there), and
  * drift is decided by string equality — so a block joined with `\n` would report all 16
  * files as drifted, fail the hook on every commit, and "fix" them into mixed endings
  * that the next checkout reverts. `.gitattributes` pins the repo to LF; this keeps the
  * script honest on a tree that arrived some other way.
+ *
+ * The majority ending, not the first one seen: a single stray CRLF — one line pasted from
+ * a Windows terminal — would otherwise be enough to rewrite the block with CRLF in an
+ * all-LF file, which converges but leaves the endings mixed.
  */
-const lineEndingOf = (source: string): string => (source.includes('\r\n') ? '\r\n' : '\n');
-
-const countOccurrences = (source: string, marker: string): number =>
-  source.split(marker).length - 1;
+const lineEndingOf = (source: string): string =>
+  countOccurrences(source, '\r\n') * 2 > countOccurrences(source, '\n') ? '\r\n' : '\n';
 
 /**
- * A file may carry at most one intact marker pair. Anything else — a duplicate, an
- * orphan left by a hand-edit or a bad merge — is ambiguous about which span is the
- * generated one, and guessing means deleting whatever sits between the wrong pair.
- * This runs before any span is chosen, and the fix is always the same: delete the stray
- * marker.
+ * A file may carry at most one marker pair, open before close. Anything else — a
+ * duplicate, an orphan left by a hand-edit or a bad merge, a swapped pair — is ambiguous
+ * about which span is the generated one, and guessing means deleting whatever sits
+ * between the wrong markers.
+ *
+ * This runs before any span is chosen, so the counts it reports are the ones in the file
+ * the reader is about to open. Validating after a transform instead would report the
+ * markers this script just added and send them looking for a stray that is not there.
  */
 const assertMarkersWellFormed = (source: string, locale: string): void => {
   const opens = countOccurrences(source, OPEN_MARKER);
   const closes = countOccurrences(source, CLOSE_MARKER);
-  if (opens === closes && opens <= 1) return;
 
-  throw new Error(
-    `${displayPath(locale)}: expected one ${OPEN_MARKER} / ${CLOSE_MARKER} pair, found ` +
-      `${opens} open and ${closes} close. Remove the stray marker — leaving it would ` +
-      'let this script overwrite the content between it and the real block.',
-  );
+  if (opens !== closes || opens > 1) {
+    throw new Error(
+      `${displayPath(locale)}: expected one ${OPEN_MARKER} / ${CLOSE_MARKER} pair, found ` +
+        `${opens} open and ${closes} close. Remove the stray marker — leaving it would ` +
+        'let this script overwrite the content between it and the real block.',
+    );
+  }
+
+  if (opens === 1 && source.indexOf(CLOSE_MARKER) < source.indexOf(OPEN_MARKER)) {
+    throw new Error(
+      `${displayPath(locale)}: ${CLOSE_MARKER} comes before ${OPEN_MARKER}. Swap them, so ` +
+        'the generated block is the region between the pair rather than everything outside it.',
+    );
+  }
 };
 
 const relativePath = (from: string, to: string): string => {
@@ -132,11 +133,25 @@ const displayPath = (locale: string): string => readmeFor(locale).slice(ROOT.len
 const looksLikeSwitcher = (line: string): boolean =>
   LOCALES.filter(([, label]) => line.includes(label)).length >= SWITCHER_LABEL_QUORUM;
 
-/** The span the generated block should replace, or null when the file has none yet. */
+/**
+ * The span the generated block should replace, or null when the file has none yet.
+ *
+ * The markers are the anchor — matching "the first centered `<sub>` line" instead would
+ * let this script overwrite any other centered small-text line that happens to come
+ * first, which is a silent way to lose content.
+ *
+ * Plain `indexOf`, not a regex over the region: `assertMarkersWellFormed` has already
+ * established there is at most one of each marker and that open comes first, so the two
+ * offsets *are* the span. A regex would additionally have to decide what may sit between
+ * the markers, and the obvious `OPEN\n…\nCLOSE` shape quietly requires a line between
+ * them — so a pair added by hand on adjacent lines, which is exactly what the error in
+ * `applySwitcher` asks for, would not be recognized as the block at all.
+ */
 const locateSwitcher = (source: string): { start: number; end: number } | null => {
-  const marked = source.match(MARKED_BLOCK);
-  if (marked?.index !== undefined) {
-    return { start: marked.index, end: marked.index + marked[0].length };
+  const open = source.indexOf(OPEN_MARKER);
+  const close = source.indexOf(CLOSE_MARKER);
+  if (open !== -1 && close > open) {
+    return { start: open, end: close + CLOSE_MARKER.length };
   }
 
   // Pre-marker files: take the first centered line that reads like a switcher, and
