@@ -16,9 +16,15 @@ set -e
 
 # The generator decides the contents of all 16 READMEs, so a commit that touches only it
 # — reordering LOCALES, say — can drift every one of them without staging a README.
-# No --diff-filter: deleting or renaming a translation drifts the set just as much as
-# editing one, and both show up here (a rename under its destination path).
-git diff --cached --name-only |
+# No --diff-filter: deleting or renaming a README drifts the set just as much as editing
+# one, and both have to show up here.
+#
+# --no-renames, so a rename is listed under both its old and its new path. Reported as a
+# rename, `git mv README.md OVERVIEW.md` shows only the destination — which does not match
+# the pattern, so the hook would exit 0 on a commit that invalidates every switcher block.
+# Translations survive that (docs/i18n/zz/README.md still matches under either path); the
+# root file does not.
+git diff --cached --name-only --no-renames |
   grep -qE '(^|/)README\.md$|^scripts/docs-switcher\.ts$' || exit 0
 
 # GUI git clients and IDEs often run hooks with a minimal PATH.
@@ -41,7 +47,10 @@ fi
 # Check the index, not the working tree. The two diverge under partial staging, and only
 # the index becomes the commit — a corrected switcher on disk must not vouch for a broken
 # one in the index, or for drift in a README this commit does not touch.
-staged_tree=$(mktemp -d) || {
+# The -n / -d checks are not paranoia about mktemp: an empty $staged_tree turns the
+# --prefix below into `--prefix=/`, and `git checkout-index --all` would write the whole
+# index into the filesystem root — with `rm -rf ""` as the trap's idea of cleanup.
+staged_tree=$(mktemp -d) && [ -n "$staged_tree" ] && [ -d "$staged_tree" ] || {
   echo "pre-commit: no temp dir available — skipping the README switcher check." >&2
   echo "  CI runs the same check." >&2
   exit 0

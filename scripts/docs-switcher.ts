@@ -191,14 +191,28 @@ const applySwitcher = (source: string, locale: string): string => {
  * nobody can navigate to.
  */
 const assertLocalesMatchDisk = (): void => {
-  // Ahead of the readdir, because its own ENOENT names an absolute path — and inside the
-  // pre-commit hook that path is the temp copy of the index, already deleted by the
-  // EXIT trap before anyone reads the message. Reachable: a commit that removes every
-  // translation still trips the hook's README grep, so it must fail actionably.
+  // Ahead of the readdir and the reads in `main`, because their own ENOENT names an
+  // absolute path — and inside the pre-commit hook that path is the temp copy of the
+  // index, already deleted by the EXIT trap before anyone reads the message. Reachable:
+  // a commit that removes every translation still trips the hook's README grep, so it
+  // must fail actionably.
   if (!existsSync(I18N_DIR)) {
     throw new Error(
       'docs/i18n/ is missing — restore it, or drop every non-`en` entry from LOCALES ' +
         'in this script.',
+    );
+  }
+
+  // `en` needs its own check rather than a line in the `missing` list below: the advice
+  // there ("translate them or drop them from the list") is wrong for the canonical file,
+  // which no translation can substitute for. Reachable by a rename — `git mv README.md
+  // OVERVIEW.md` — which the pre-commit hook does catch, so the message it prints has to
+  // be the actionable one.
+  if (!existsSync(readmeFor('en'))) {
+    throw new Error(
+      'README.md is missing from the repo root — it is the canonical README every ' +
+        'translation links back to. Restore it, or point `readmeFor` and `relativePath` ' +
+        'in this script at wherever it moved.',
     );
   }
 
