@@ -1,0 +1,69 @@
+#!/bin/sh
+# Strips AI co-author trailers from a commit message before it becomes a commit.
+#
+# Claude Code and tools like it append "Co-Authored-By: Claude … <noreply@anthropic.com>"
+# by default. .claude/settings.json turns that off for anyone working in this checkout,
+# but a personal .claude/settings.local.json overrides that file and other tools have
+# their own defaults — so the trailer can still arrive.
+#
+# This hook edits the message, where .githooks/pre-commit pointedly refuses to write: the
+# objection there is that regenerating files stages hunks deliberately left out of
+# `git add -p`, and a commit message carries no such hazard. Rejecting the commit instead
+# would only punish the human for a line their tool wrote.
+#
+# CI fails on any trailer that gets past this and is the real gate, so every environmental
+# problem below steps aside with a labelled message rather than blocking the commit.
+#
+# Installed by `bun install` — see scripts/install-hooks.ts.
+
+set -e
+
+msg_file=$1
+
+# Git always passes the message path, but a hook invoked by hand or by an unusual client
+# may not — and truncating $1 when it is empty would mean writing to the working tree.
+if [ -z "$msg_file" ] || [ ! -r "$msg_file" ] || [ ! -w "$msg_file" ]; then
+  echo "commit-msg: no writable commit message file — skipping the AI co-author check." >&2
+  echo "  CI runs the same check." >&2
+  exit 0
+fi
+
+# The overwhelmingly common case is a clean message; leave without spending a temp file.
+grep -qiE '^Co-Authored-By:.*(Claude|anthropic\.com)' "$msg_file" || exit 0
+
+cleaned=$(mktemp) && [ -n "$cleaned" ] && [ -f "$cleaned" ] || {
+  echo "commit-msg: no temp file available — leaving the message as it is." >&2
+  echo "  Delete the Co-Authored-By line yourself; CI fails on it." >&2
+  exit 0
+}
+trap 'rm -f "$cleaned"' EXIT
+
+# awk rather than `sed -i`, whose spelling differs between GNU and BSD — this has to run on
+# whatever the committer happens to have. Dropping the trailer strands the blank line that
+# separated it from the body, so trailing blanks go too: git would strip them on its way
+# into the commit, but this file is also what `--amend` and a rejected commit hand back to
+# the editor.
+if ! awk '
+  tolower($0) ~ /^co-authored-by:.*(claude|anthropic\.com)/ { next }
+  { line[++n] = $0 }
+  END {
+    while (n > 0 && line[n] ~ /^[ \t]*$/) n--
+    for (i = 1; i <= n; i++) print line[i]
+  }
+' "$msg_file" >"$cleaned"; then
+  echo "commit-msg: could not rewrite the commit message — leaving it as it is." >&2
+  echo "  Delete the Co-Authored-By line yourself; CI fails on it." >&2
+  exit 0
+fi
+
+# Redirect rather than `mv`, so git gets back the same path with the same permissions.
+if ! cat "$cleaned" >"$msg_file"; then
+  echo "commit-msg: could not write the commit message back — leaving it as it is." >&2
+  echo "  Delete the Co-Authored-By line yourself; CI fails on it." >&2
+  exit 0
+fi
+
+# A message that was nothing but the trailer is now empty, and git aborts the commit for
+# it. That is the right outcome and needs no special handling here.
+echo "commit-msg: dropped an AI co-author trailer from the commit message." >&2
+echo "  Set \"includeCoAuthoredBy\": false in your Claude Code settings to stop it at the source." >&2
