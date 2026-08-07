@@ -234,7 +234,14 @@ function drawParked(c: Ctx, i: number, j: number): void {
   }
 }
 
-function agentDrawPos(a: Agent): { px: number; py: number } {
+/**
+ * Where an agent is actually painted, in world coordinates: its position plus
+ * the eased perpendicular offset it carries mid-lane-change. Exported because
+ * an overlay drawing on top of the scene — a label pinned to a car, say — has
+ * to agree with the renderer about where that car is, and recomputing `perp`
+ * outside the package is how the two quietly drift apart.
+ */
+export function agentDrawPos(a: Agent): { px: number; py: number } {
   let px = a.x;
   let py = a.y;
   if (a.mode === 'road') {
