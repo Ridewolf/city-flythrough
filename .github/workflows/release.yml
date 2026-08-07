@@ -29,9 +29,27 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
+      # Trusted publishing (OIDC) needs npm 11.5.1+, and Node 22 bundles 10.9.x — which
+      # has no OIDC support at all, so an unauthenticated publish fails with ENEEDAUTH
+      # rather than anything that points at the cause. Upgrading npm here rather than
+      # moving to a Node line that happens to bundle 11.x keeps the requirement stated
+      # where it applies, so bumping node-version later cannot silently undo it.
+      #
+      # Pinned to the 11.x line, not @latest: that is 12.x now, and a floating major on
+      # the publish path is a bad trade for a feature 11.5.1 already has. 11.x also asks
+      # only for node >=22.9, where 12.x wants ^22.22.2 and would break on an older
+      # 22.x from the tool cache.
+      - name: Ensure npm can use trusted publishing
+        run: npm install -g "npm@^11.5.1"
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Auth: NPM_TOKEN takes precedence when set, and changesets/action falls back to
+      # OIDC when it is empty or absent. Trusted publishing is configured per package on
+      # npmjs.com, so it cannot cover a package that has never been published — 0.1.0
+      # needs the token. Once it is on the registry: add the trusted publisher there,
+      # delete the NPM_TOKEN secret, and this job switches over with no edit here.
       - name: Create release PR or publish
         uses: changesets/action@v1
         with:
