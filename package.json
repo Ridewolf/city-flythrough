@@ -1,6 +1,6 @@
 {
   "name": "@ridewolf/city-flythrough",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A procedural city with living traffic on a 2D canvas: deterministic world generation, traffic lights, roundabouts, lane changes, and adaptive performance. Zero dependencies.",
   "license": "MIT",
   "type": "module",
