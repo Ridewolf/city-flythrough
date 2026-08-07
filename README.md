@@ -84,9 +84,32 @@ Or run the bundled demo: `bun run build && bunx serve .` →
 | `renderFrame`, `PALETTE_DARK`, `PALETTE_LIGHT` | The renderer and themes — bring your own loop or palette. |
 | `roadInfo`, `lightGreen`, `hash`, ... | The deterministic world functions, exported individually. |
 | `measurePerfFactor`, `dprCapFor` | The device benchmark, reusable for any canvas scene. |
+| `agentDrawPos` | Where a car is painted, in world coordinates — for overlays that have to agree with the renderer. |
 
-Options: `minimal`, `theme` / `palette`, `rng` (deterministic scenes), and
-`respectReducedMotion`.
+Options: `minimal`, `theme` / `palette`, `rng` (deterministic scenes),
+`respectReducedMotion`, and `onOverlay`.
+
+### Drawing on top of the scene
+
+`onOverlay` runs once per rendered frame, after the scene, with the context
+already in **world coordinates** — so `agentDrawPos(car)` lands where that car
+was drawn, with no viewport arithmetic:
+
+```ts
+createCityFlythrough(canvas, {
+  onOverlay: (ctx, { dt, agents }) => {
+    const car = agents[0];
+    if (!car) return;
+    const { px, py } = agentDrawPos(car);
+    ctx.fillText('42 km/h', px, py - 14);
+  },
+});
+```
+
+The transform is translate-only, so text and line widths keep their pixel sizes.
+Anything that persists across frames should advance on `dt` and drop its subject
+once it leaves `agents` — the sim recycles cars that go off-screen, and a handle
+kept past that pins an overlay to a car the scene no longer draws.
 
 ## Performance
 

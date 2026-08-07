@@ -6,10 +6,17 @@
 import { dprCapFor, measurePerfFactor } from './perf';
 import { PALETTE_DARK, PALETTE_LIGHT, type Palette, renderFrame } from './render';
 import { Sky } from './sky';
-import { TrafficSim, type Viewport } from './traffic';
+import { type Agent, TrafficSim, type Viewport } from './traffic';
 
 export { dprCapFor, factorFromMs, measurePerfFactor } from './perf';
-export { PALETTE_DARK, PALETTE_LIGHT, type Palette, renderFrame, type Scene } from './render';
+export {
+  agentDrawPos,
+  PALETTE_DARK,
+  PALETTE_LIGHT,
+  type Palette,
+  renderFrame,
+  type Scene,
+} from './render';
 export { type Aircraft, CLOUD_SHAPES, type Cloud, Sky } from './sky';
 export {
   type Agent,
@@ -53,6 +60,32 @@ export interface CityFlythroughOptions {
   rng?: () => number;
   /** Respect `prefers-reduced-motion` (render one static frame). Default true. */
   respectReducedMotion?: boolean;
+  /**
+   * Draw on top of the finished scene, once per rendered frame.
+   *
+   * The context arrives in **world coordinates** — the same space the scene was
+   * drawn in, so `agentDrawPos(agent)` lands where that car is on screen with no
+   * conversion. The transform is translate-only, so text and line widths keep
+   * their pixel sizes. Save/restore is handled around the call.
+   *
+   * Anything stateful (a label that fades, a marker that follows one car) should
+   * advance on `dt` and drop its subject when it leaves `agents` — the sim
+   * recycles cars that go off-screen, and a handle kept past that would pin an
+   * overlay to a car the scene no longer draws.
+   */
+  onOverlay?: (ctx: CanvasRenderingContext2D, frame: OverlayFrame) => void;
+}
+
+/** What an `onOverlay` callback is handed for the frame it is drawing onto. */
+export interface OverlayFrame {
+  /** Seconds since the previous rendered frame; `0` on the static reduced-motion frame. */
+  dt: number;
+  /** Seconds the scene has been running. */
+  elapsed: number;
+  /** The visible world rectangle. */
+  view: Viewport;
+  /** The live agents — the same objects the scene just drew, not a copy. */
+  agents: readonly Agent[];
 }
 
 export interface CityFlythrough {
@@ -136,6 +169,17 @@ export function createCityFlythrough(
       aircraft: sky.aircraft,
       elapsed: sim.elapsed,
     });
+
+    // renderFrame restores the transform before returning, so re-apply the world
+    // translate: an overlay pinned to a car should be written in the same
+    // coordinates the car was drawn in, not in screen pixels the caller would
+    // have to derive from the viewport itself.
+    if (options.onOverlay) {
+      ctx.save();
+      ctx.translate(-v.left, -v.top);
+      options.onOverlay(ctx, { dt, elapsed: sim.elapsed, view: v, agents: sim.agents });
+      ctx.restore();
+    }
   }
 
   function frame(ts: number): void {
